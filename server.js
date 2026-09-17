@@ -15,7 +15,7 @@ app.use(express.urlencoded({extended:true}));
 const PORT = process.env.PORT || 10000;
 const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-render';
-const ADMIN_USER = process.env.ADMIN_USER || 'vvfd';
+const ADMIN_USER = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || 'vvfd';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '12321';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
@@ -103,6 +103,14 @@ app.post('/api/keys/generate',auth,async(req,res)=>{
 app.get('/api/keys',auth,async(req,res)=>{await expireRows(); let q,params=[]; if(req.auth.role==='admin')q='SELECT * FROM keys_tbl ORDER BY id DESC';else{q='SELECT * FROM keys_tbl WHERE created_by=$1 ORDER BY id DESC';params=['reseller:'+req.auth.user];} const r=await pool.query(q,params);res.json(r.rows);});
 app.delete('/api/keys/:id',auth,adminOnly,async(req,res)=>{await pool.query('DELETE FROM keys_tbl WHERE id=$1',[req.params.id]);res.json({ok:true});});
 
+app.post('/api/keys/:id/toggle',auth,adminOnly,async(req,res)=>{
+  const row=(await pool.query('SELECT status FROM keys_tbl WHERE id=$1',[req.params.id])).rows[0];
+  if(!row) return res.status(404).json({message:'ไม่พบคีย์'});
+  const next=row.status==='disabled'?'unused':'disabled';
+  const r=await pool.query('UPDATE keys_tbl SET status=$1 WHERE id=$2 RETURNING *',[next,req.params.id]);
+  res.json(r.rows[0]);
+});
+
 app.post('/api/resellers',auth,adminOnly,async(req,res)=>{
   const username=String(req.body.username||'').trim(); const password=String(req.body.password||''); const credits=Math.max(0,parseInt(req.body.credits||0,10)); const days=parseInt(req.body.days||0,10); const unlimited=!!req.body.unlimited;
   if(!username||!password||![0,30].includes(days))return res.status(400).json({message:'ข้อมูลไม่ถูกต้อง'});
@@ -113,8 +121,11 @@ app.post('/api/resellers/:id/toggle',auth,adminOnly,async(req,res)=>{const r=awa
 
 app.post('/api/patch-files',auth,adminOnly,upload.single('file'),async(req,res)=>{
   if(!req.file)return res.status(400).json({message:'กรุณาเลือกไฟล์'});
-  const name=String(req.body.name||req.file.originalname).slice(0,120); const target=req.body.target_path?String(req.body.target_path).slice(0,500):null;
-  const r=await pool.query('INSERT INTO patch_files(name,original_name,storage_path,target_path,created_by) VALUES($1,$2,$3,$4,$5) RETURNING *',[name,req.file.originalname,req.file.path,target,req.auth.user]);
+  const name=String(req.body.name||'').trim().slice(0,120);
+  const functionName=String(req.body.function_name||'').trim().slice(0,120);
+  const target=String(req.body.target_path||'').trim().slice(0,500);
+  if(!name || !functionName || !target){ try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({message:'กรุณาระบุชื่อฟังก์ชันและ Target Path ให้ครบ'}); }
+  const r=await pool.query('INSERT INTO patch_files(name,original_name,storage_path,target_path,created_by) VALUES($1,$2,$3,$4,$5) RETURNING *',[`${functionName} — ${name}`,req.file.originalname,req.file.path,target,req.auth.user]);
   res.json(r.rows[0]);
 });
 app.get('/api/patch-files',auth,adminOnly,async(req,res)=>res.json((await pool.query('SELECT * FROM patch_files ORDER BY id DESC')).rows));
@@ -141,6 +152,7 @@ app.post('/api/validate-key',async(req,res)=>{
   }catch(e){return res.status(500).json({valid:false,message:'Server error'});}
 });
 
+app.get('/login',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 init().then(()=>app.listen(PORT,()=>console.log(`NEXTRA PRO running on ${PORT}`))).catch(e=>{console.error(e);process.exit(1)});
