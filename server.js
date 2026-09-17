@@ -19,7 +19,7 @@ const ADMIN_USER = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || 'vvfd
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '12321';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
-if (!DATABASE_URL) console.warn('DATABASE_URL is not set. Create a Render PostgreSQL database and connect it.');
+if (!DATABASE_URL) console.warn('DATABASE_URL is not set. The web UI can load, but database actions require Render PostgreSQL to be connected.');
 const pool = new Pool({connectionString: DATABASE_URL, ssl: DATABASE_URL ? {rejectUnauthorized:false} : undefined});
 
 app.use((req,res,next)=>{res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');res.setHeader('Access-Control-Allow-Methods','GET,POST,DELETE,OPTIONS');if(req.method==='OPTIONS')return res.sendStatus(204);next();});
@@ -32,7 +32,12 @@ const upload = multer({dest: uploadDir, limits:{fileSize:100*1024*1024}});
 const prices = {1:5,3:15,7:25,15:40,30:80,60:200,90:300,0:800};
 function now(){return new Date();}
 function tokenFor(user, role, resellerId=null){return jwt.sign({user,role,resellerId},JWT_SECRET,{expiresIn:'7d'});}
+function requireDatabase(req,res,next){
+  if(!DATABASE_URL) return res.status(503).json({message:'ฐานข้อมูลยังไม่ได้เชื่อมต่อ: ตั้งค่า DATABASE_URL ใน Render หรือ Deploy ด้วย render.yaml'});
+  next();
+}
 function auth(req,res,next){
+  if(!DATABASE_URL) return res.status(503).json({message:'ฐานข้อมูลยังไม่ได้เชื่อมต่อ: ตั้งค่า DATABASE_URL ใน Render หรือ Deploy ด้วย render.yaml'});
   const h=req.headers.authorization||''; const t=h.startsWith('Bearer ')?h.slice(7):null;
   if(!t) return res.status(401).json({message:'ต้องเข้าสู่ระบบ'});
   try{req.auth=jwt.verify(t,JWT_SECRET);next();}catch(e){return res.status(401).json({message:'เซสชันหมดอายุ'});}
@@ -45,7 +50,10 @@ async function init(){
   await pool.query(fs.readFileSync(path.join(__dirname,'schema.sql'),'utf8'));
 }
 
-app.get('/health',(req,res)=>res.json({ok:true,service:'NEXTRA PRO'}));
+app.get('/health',async(req,res)=>{
+  if(!DATABASE_URL) return res.status(503).json({ok:false,service:'NEXTRA PRO',database:'not_configured',message:'DATABASE_URL is not configured'});
+  try{await pool.query('SELECT 1');res.json({ok:true,service:'NEXTRA PRO',database:'connected'});}catch(e){res.status(503).json({ok:false,service:'NEXTRA PRO',database:'error',message:'Database connection failed'});}
+});
 app.post('/api/login',async(req,res)=>{
   try{
     const u=String(req.body.username||'').trim(), p=String(req.body.password||'');
@@ -121,11 +129,8 @@ app.post('/api/resellers/:id/toggle',auth,adminOnly,async(req,res)=>{const r=awa
 
 app.post('/api/patch-files',auth,adminOnly,upload.single('file'),async(req,res)=>{
   if(!req.file)return res.status(400).json({message:'กรุณาเลือกไฟล์'});
-  const name=String(req.body.name||'').trim().slice(0,120);
-  const functionName=String(req.body.function_name||'').trim().slice(0,120);
-  const target=String(req.body.target_path||'').trim().slice(0,500);
-  if(!name || !functionName || !target){ try{fs.unlinkSync(req.file.path)}catch(e){} return res.status(400).json({message:'กรุณาระบุชื่อฟังก์ชันและ Target Path ให้ครบ'}); }
-  const r=await pool.query('INSERT INTO patch_files(name,original_name,storage_path,target_path,created_by) VALUES($1,$2,$3,$4,$5) RETURNING *',[`${functionName} — ${name}`,req.file.originalname,req.file.path,target,req.auth.user]);
+  const name=String(req.body.name||req.file.originalname).slice(0,120); const target=req.body.target_path?String(req.body.target_path).slice(0,500):null;
+  const r=await pool.query('INSERT INTO patch_files(name,original_name,storage_path,target_path,created_by) VALUES($1,$2,$3,$4,$5) RETURNING *',[name,req.file.originalname,req.file.path,target,req.auth.user]);
   res.json(r.rows[0]);
 });
 app.get('/api/patch-files',auth,adminOnly,async(req,res)=>res.json((await pool.query('SELECT * FROM patch_files ORDER BY id DESC')).rows));
