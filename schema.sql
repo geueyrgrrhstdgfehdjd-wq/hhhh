@@ -1,0 +1,34 @@
+CREATE TABLE IF NOT EXISTS resellers (
+  id SERIAL PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  credits INTEGER NOT NULL DEFAULT 0,
+  unlimited BOOLEAN NOT NULL DEFAULT FALSE,
+  expires_at TIMESTAMPTZ NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS keys_tbl (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  key_value TEXT UNIQUE NOT NULL,
+  duration_days INTEGER NOT NULL,
+  credits INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'unused',
+  activated_at TIMESTAMPTZ NULL,
+  expires_at TIMESTAMPTZ NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by TEXT NOT NULL DEFAULT 'admin'
+);
+
+CREATE TABLE IF NOT EXISTS patch_files (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  target_path TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by TEXT NOT NULL
+);
